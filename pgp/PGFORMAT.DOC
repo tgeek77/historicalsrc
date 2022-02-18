@@ -1,0 +1,258 @@
+Appendix A.  (Beta test release 22 May 91)
+
+
+Internal Data Structures Used by PGP
+====================================
+
+This appendix describes the data structures used internally by Pretty
+Good Privacy (PGP), the RSA public key cryptography application.  The
+intended audience mainly includes software engineers trying to port
+PGP to other hardware environments or trying to implement other PGP-
+compatible cryptography products.
+
+Some of these data structures may change before PGP is released.  
+Also, CRC-16 frame checks may be added to some packets.
+
+
+Byte Order
+----------
+
+All integer data used by PGP is externally stored least significant
+byte (LSB) first, regardless of the byte order used internally by the
+host CPU architecture.  This is for cross-compatibility of messages
+and keys between hosts.  This covers multiprecision RSA integers, bit
+count prefix fields, byte count prefix fields, key IDs, and
+timestamps.
+
+
+Multiprecision Integers
+-----------------------
+
+RSA arithmetic involves a lot of multiprecision integers, often
+having hundreds of bits of precision.  PGP externally stores a
+multiprecision integer (MPI) with a 16-bit prefix that gives the
+number of significant bits in the integer that follows.  The integer
+that follows this bitcount field is stored LSB first, with the MSB
+padded with zero bits if the bitcount is not a multiple of 8.  The
+bitcount always specifies the exact number of significant bits.  For
+example, the integer value 5 would be stored as these three bytes:
+
+    03 00 05
+
+An MPI with a value of zero is simply stored with the 16-bit bitcount 
+prefix field containing a 0, with no value bytes following it.
+
+
+
+Key ID
+------
+
+Some packets use a "key ID" field.  The key ID is the least
+significant 64 bits of the RSA public modulus that was involved in
+creating the packet.  For all practical purposes it unique to each 
+RSA public key.
+
+
+User ID
+-------
+
+Some packets contain a "user ID", which is an ASCII string that
+contains the user's name.  Unlike a C string, the user ID has a
+length byte at the beginning that has a byte count of the rest of the
+string.  This length byte does not include itself in the count.
+
+
+Timestamp
+---------
+
+Some packets contain a timestamp, which is a 32-bit unsigned integer
+of the number of seconds elapsed since 1970 Jan 1 00:00:00 GMT.  This
+is the standard format used by Unix timestamps.  It spans 136 years. 
+
+
+
+Cipher Type Byte (CTB)
+----------------------
+
+Many of these data structures begin with a Cipher Type Byte (CTB),
+which specifies the type of data structure that follows it.  The CTB 
+bit fields have the following meaning (bit 0 is the LSB, bit 7 is the
+MSB):
+
+Bit 7:     Always 1, which designates this as a CTB
+Bit 6:     Reserved.
+Bits 5-2:  CTB type field, specifies type of packet that follows
+           0001 - RSA public-key-encrypted packet
+           0010 - RSA secret-key-encrypted (signed) packet
+           0011 - Message digest packet
+           0100 - Conventional key packet
+           0101 - Secret key certificate
+           0110 - Public key certificate
+           1000 - Compressed data packet
+           1001 - Conventional-Key-Encrypted data
+           1100 - Raw literal plaintext data
+           Other CTB packet types are unimplemented.
+Bits 1-0:  Length-of-length field:
+           00 - 1 byte packet length field follows CTB
+           01 - 2 byte packet length field follows CTB
+           10 - 4 byte packet length field follows CTB
+           11 - no length field follows CTB, unknown packet length.
+           The 8-, 16-, or 32-bit packet length field after the CTB 
+           gives the length in bytes of the rest of the packet, not
+           counting the CTB and the packet length field.
+
+
+
+RSA public-key-encrypted packet
+-------------------------------
+
+Offset  Length  Meaning
+0       1       CTB for RSA public-key-encrypted packet
+1       2       16-bit length of packet
+3       8       64-bit Key ID
+11      ?       RSA-encrypted integer, encrypted conventional key
+                packet.  (MPI with bitcount prefix)
+
+The conventionally-encrypted ciphertext packet begins right after the 
+RSA public-key-encrypted packet that contains the conventional key.
+
+
+
+RSA secret-key-encrypted (signed) packet
+----------------------------------------
+
+Offset  Length  Meaning
+0       1       CTB for RSA secret-key-encrypted (signed) packet
+1       2       16-bit length of packet
+3       8       64-bit Key ID
+11      ?       RSA-encrypted integer, encrypted message digest
+                packet.  (MPI with bitcount prefix)
+
+If the plaintext that was signed is included in the same file as the
+signature packet, it begins right after the RSA secret-key-signed 
+packet that contains the message digest.  The plaintext has a
+"literal" CTB prefix.
+
+
+
+Message digest packet
+---------------------
+
+Offset  Length  Meaning
+0       1       CTB for Message digest packet
+1       1       8-bit length of packet
+2       1       Message digest algorithm selector byte
+3       16      128-bit message digest
+19      4       32-bit timestamp
+
+
+
+Conventional key packet
+-----------------------
+
+Offset  Length  Meaning
+0       1       CTB for Conventional key packet
+1       1       8-bit length of packet
+2       1       Conventional encryption algorithm selector byte
+3       ?       Key material for conventional algorithm
+
+
+
+Conventional Key Encrypted data packet
+--------------------------------------
+
+Offset  Length  Meaning
+0       1       CTB for Conventional-Key-Encrypted data packet
+1	?	conventionally-encrypted data, no length field
+
+The conventionally-encrypted ciphertext begins right after the 
+CTB.  No length field follows CTB, unknown packet length.
+The decrypted ciphertext may contain a compressed data packet or a
+literal plaintext packet.
+
+The conventionally-encrypted data has a 4-byte "key-check" prefix. 
+This key-check prefix is inserted before encryption and discarded
+after decryption.  The key-check prefix is only visible only after
+decrypting the ciphertext in the packet.  The key-check prefix is
+composed of two identical copies of a 16-bit random number.  During
+decryption, the first 4 bytes of decrypted plaintext are checked to
+see if the first 2 bytes match the second 2 bytes.  If this key-check
+prefix meets this criterium, then the conventional key is assumed to
+be correct.  
+
+
+
+Compressed data packet
+----------------------
+
+Offset  Length  Meaning
+0       1       CTB for Compressed data packet
+1	1	Compression algorithm selector byte
+2	?	compressed data, no length field
+
+The compressed data begins right after the algorithm selector byte.
+No length field follows CTB, unknown packet length.
+The compressed data may decompress into a raw literal plaintext data
+packet with its own CTB.
+
+
+
+Literal data packet
+-------------------
+
+Offset  Length  Meaning
+0       1       CTB for raw literal data packet
+1	?	raw literal plaintext data, no length field
+
+The raw literal plaintext data begins right after the 
+CTB.  No length field follows CTB, unknown packet length.
+
+
+
+RSA secret key certificate
+--------------------------
+
+Offset  Length  Meaning
+0       1       CTB for RSA secret key certificate
+1       2       16-bit length of packet
+3       4       Timestamp
+7       ?       User ID
+?       ?       MPI of RSA public modulus n
+?       ?       MPI of RSA public encryption exponent e
+?       ?       MPI of RSA secret decryption exponent d
+?       ?       MPI of RSA secret factor p
+?       ?       MPI of RSA secret factor q
+?       ?       MPI of RSA secret multiplicative inverse u
+                (All MPI's have bitcount prefixes)
+
+All secret fields in the secret key certificate may be password-
+encrypted.  The public fields are not encrypted.
+
+
+
+Public key certificate
+----------------------
+
+Offset  Length  Meaning
+0       1       CTB for RSA public key certificate
+1       2       16-bit length of packet
+3       4       Timestamp
+7       ?       User ID
+?       ?       MPI of RSA public modulus n
+?       ?       MPI of RSA public encryption exponent e
+                (All MPI's have bitcount prefixes)
+
+
+
+"Secret key compromised" certificate
+------------------------------------
+
+Note that a "secret key compromise" certificate is exactly the same 
+as a public key certificate, but with public exponent e=0.
+
+The current version of PGP does not generate any secret key
+compromise certificates.
+
+
+
+
